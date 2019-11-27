@@ -34,7 +34,22 @@
 #define JUDGE_BORDER_GOOD  0.100
 #define JUDGE_PHASES       4
 
+
 using std::string;
+
+std::vector<string> JUDGES_TEXTS = {
+  "!GREAT!",
+  " GREAT ",
+  " GOOD  ",
+  " MISS  ",
+  "       "
+};
+
+std::vector<string> JUDGES_TIMING = {
+  "FAST",
+  "SLOW",
+  "    "
+};
 
 struct Option {
   double speed;
@@ -95,6 +110,10 @@ struct Player {
   ChunkTable chunkTable;
   Segments_i segments;
   double     startTime;
+  double     currentTime;
+  double     lastJudgeTime;
+  int        lastJudge;
+  int        lastTiming;
   double     beat;
   double     bpm;
   Chips_i    bgm;
@@ -111,6 +130,7 @@ struct Score {
   int combo;
   int comboBonus;
   int maxCombo;
+  int exScore;
   int point;
   int totalJudges;
   int totalNotes;
@@ -150,9 +170,11 @@ void     calcReset(Score &);
 void     comboCount(Score &);
 void     comboBonus(Score &);
 void     scoreCount(Score &);
+void     exScoreCount(Score &);
 void     handler(Player &, Option &, Score &);
 void     gameOver(Player &, Score &);
 void     printScore(Player &, Option &, Score &);
+void     setLastJudge(Player &, int, int);
 
 void     printHelp(void);
 
@@ -493,6 +515,7 @@ void update(Player &player, Option &option, Score &score) {
   double   currentTime = (getTime() - player.startTime) / 1000;
   Segment &segment     = getSegment(player.segments, currentTime);
 
+  player.currentTime = currentTime;
   player.beat = segment.beat + (currentTime - segment.time) * segment.velocity;
   player.bpm  = segment.bpm;
 
@@ -590,7 +613,20 @@ void render(Player &player, Option &option, Score &score) {
   mvprintw(h - 4, 8 * LANES_COUNT, "%6d", score.judges[2]);
   mvprintw(h - 3, 8 * LANES_COUNT, "%6d", score.judges[3]);
 
-  mvprintw(h - 1, 8 * LANES_COUNT, "%6d", score.combo);
+  mvprintw(h - 10, 5 * LANES_COUNT, "%6d", score.combo);
+  if (player.lastJudgeTime > 0) {
+    if (player.lastJudgeTime + 500 < player.currentTime) {
+      player.lastJudge = 4;
+      player.lastTiming = 2;
+    }
+    if (player.lastJudge == 0)
+      player.lastTiming = 2;
+    if (player.lastTiming == 0) attrset(COLOR_PAIR(COLOR_BLUE)); else
+    if (player.lastTiming == 1) attrset(COLOR_PAIR(COLOR_RED));
+    mvprintw(h - 11, 4 * LANES_COUNT, "  %s", JUDGES_TIMING[player.lastTiming].c_str());
+    attrset(0);
+    mvprintw(h - 10, 4 * LANES_COUNT, "%s", JUDGES_TEXTS[player.lastJudge].c_str());
+  }
 
   refresh();
 }
@@ -620,6 +656,7 @@ void judge(Player &player, Option &option, Score &score, Lane &lane, int index) 
     judgeln(player, option, score, lane, index);
     return;
   }
+  setLastJudge(player, 3, 1);
 
   double time = (lane.begin->beat - player.beat) * 60 / player.bpm;
   if (time >= JUDGE_BORDER_GOOD) return;
@@ -638,6 +675,7 @@ void judge(Player &player, Option &option, Score &score, Lane &lane, int index) 
   if (abs < JUDGE_BORDER_COOL ) judge = 1; else
   if (abs < JUDGE_BORDER_GREAT) judge = 2; else
   if (abs < JUDGE_BORDER_GOOD ) judge = 3; else return;
+  setLastJudge(player, judge - 1, time < 0);
 
   if (lane.begin->beat2 > 0) {
     player.judges[index] = judge;
@@ -646,6 +684,12 @@ void judge(Player &player, Option &option, Score &score, Lane &lane, int index) 
 
   calculate(score, judge);
   lane.begin++;
+}
+
+void setLastJudge(Player &player, int judge, int timing) {
+  player.lastJudgeTime = player.currentTime;
+  player.lastJudge = judge;
+  player.lastTiming = timing;
 }
 
 void judgeln(Player &player, Option &option, Score &score, Lane &lane, int index) {
@@ -698,6 +742,10 @@ void scoreCount(Score &score) {
   score.point = (75000 * j[0] / t) + ((50000 * j[1] + 10000 * j[2]) / t) + c;
 }
 
+void exScoreCount(Score &score) {
+  score.exScore = (score.judges[0] * 2) + score.judges[1];
+}
+
 void handler(Player &player, Option &option, Score &score) {
   for (int i = 0; i < LANES_COUNT; i++)
     player.inputs[i] <<= 1;
@@ -740,20 +788,22 @@ void handler(Player &player, Option &option, Score &score) {
 void gameOver(Player &player, Score &score) {
   comboCount(score);
   scoreCount(score);
+  exScoreCount(score);
   player.gameover = 1;
   player.quit     = 1;
 }
 
 void printScore(Player &player, Option &option, Score &score) {
   if (!player.gameover || option.autoPlay) return;
-  std::printf("%s  %d-%d-%d-%d:%d Score:%d\n",
+  std::printf("%s  %d-%d-%d-%d:%d Score:%d\nEx score:%d\n",
               player.title.c_str(),
               score.judges[0],
               score.judges[1],
               score.judges[2],
               score.judges[3],
               score.maxCombo,
-              score.point);
+              score.point,
+              score.exScore);
 }
 
 void printHelp() {
